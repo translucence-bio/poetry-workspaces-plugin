@@ -50,4 +50,3 @@ def test_raises_in_non_workspaces_project(test_package):
 
     assert result.output == ''
     assert result.error_output.startswith('Could not find')
-

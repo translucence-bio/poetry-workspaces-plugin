@@ -12,11 +12,10 @@ from poetry.plugins.application_plugin import ApplicationPlugin
 
 from poetry_workspaces_plugin.commands.remove import RemoveCommand
 from poetry_workspaces_plugin.context import Context
-from poetry_workspaces_plugin.poetry import PoetryWorkspaces
 from poetry_workspaces_plugin.commands.add import AddCommand
 from poetry_workspaces_plugin.commands.workspace import WorkspaceCommand
 from poetry_workspaces_plugin.commands.workspaces_list import WorkspacesListCommand
-from poetry_workspaces_plugin.utils import get_root_poetry
+from poetry_workspaces_plugin.poetry import get_workspaces_poetry
 
 
 if TYPE_CHECKING:
@@ -37,11 +36,9 @@ class WorkspacesPlugin(ApplicationPlugin):
         Args:
             application: The Poetry application instance.
         """
-        root_poetry = get_root_poetry(application.poetry.pyproject_path.parent)
+        root_poetry = get_workspaces_poetry(application.poetry.pyproject_path.parent)
 
         if root_poetry:
-            root_poetry = PoetryWorkspaces.from_poetry(root_poetry)
-
             self.context = Context(
                 root_poetry=root_poetry,
                 target_poetry=application.poetry,
@@ -50,7 +47,7 @@ class WorkspacesPlugin(ApplicationPlugin):
             # If target project is not a managed workspace, don't register commands.
             # This could happen if for whatever reason there are non-workspace projects
             # alongside workspace projects.
-            if self.context.target_is_managed:
+            if self.context.target_is_managed or self.context.target_is_root:
                 add_command = AddCommand(self.context)
                 add_command.set_application(application)
 

@@ -11,9 +11,13 @@ class Context:
     target_poetry: Poetry
 
     @property
-    def target_is_managed(self):
-        workspaces_paths = [wp.pyproject_path for wp in self.root_poetry.workspaces_poetries]
+    def target_is_root(self):
+        is_root = self.target_poetry.pyproject_path == self.root_poetry.pyproject_path
 
-        is_managed = self.target_poetry.pyproject_path in workspaces_paths
+        return is_root
+
+    @property
+    def target_is_managed(self):
+        is_managed = self.target_poetry.pyproject_path in self.root_poetry.workspaces_paths
 
         return is_managed

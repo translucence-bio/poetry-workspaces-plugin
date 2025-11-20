@@ -1,10 +1,10 @@
+from pathlib import Path
 from typing import cast
 
 from cleo.helpers import argument
-from poetry.console.commands.command import Command
-from poetry.poetry import Poetry
 
 from poetry_workspaces_plugin.commands.base import BaseCommand
+from poetry_workspaces_plugin.utils import get_default_poetry
 
 
 class WorkspaceCommand(BaseCommand):
@@ -28,15 +28,15 @@ class WorkspaceCommand(BaseCommand):
         workspace_name = self.argument('workspace_name')
         command_name = self.argument('command_name')
 
-        workspace_poetries = self.context.root_poetry.workspaces_poetries
+        workspaces_paths = self.context.root_poetry.workspaces_paths
 
-        workspace_poetry = next(
-            filter(lambda wp: wp.pyproject.path.parent.name == workspace_name, workspace_poetries),
+        workspace_path = next(
+            filter(lambda wp: wp.parent.name == workspace_name, workspaces_paths),
             None,
         )
-        workspace_poetry = cast(Poetry | None, workspace_poetry)
+        workspace_path = cast(Path | None, workspace_path)
 
-        if not workspace_poetry:
+        if not workspace_path:
             raise ValueError(f'Could not find a project with the name: {workspace_name}')
 
         name = command_name[0]
@@ -46,7 +46,17 @@ class WorkspaceCommand(BaseCommand):
             f'Running <info>{name}</info> in workspace <question>{workspace_name}</question>\n'
         )
 
-        self.context.target_poetry = workspace_poetry
+        target_poetry = get_default_poetry(workspace_path.parent)
+
+        if not target_poetry:
+            self.line_error(
+                f'Pyproject file for workspace "{workspace_name}" is invalid or does not exist.',
+                'error',
+            )
+
+            return 1
+
+        self.context.target_poetry = target_poetry
 
         self.call(name, args)
 

@@ -33,6 +33,21 @@
       "cwd": "${workspaceFolder}/dev"
     },
     {
+      "name": "Debug workspace remove",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-0",
+        "--",
+        "remove",
+        "pytest"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
       "name": "Debug workspaces list",
       "type": "python",
       "request": "launch",
