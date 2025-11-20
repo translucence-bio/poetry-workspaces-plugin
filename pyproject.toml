@@ -1,11 +1,10 @@
 [tool.poetry]
-name = "poetry-monoranger-plugin"
-version = "0.4.1"
-description = "Monoranger is a plugin for Poetry that helps you manage your monorepo, enabling shared lockfiles and virtual environments."
+name = "poetry-workspaces-plugin"
+version = "0.5.0"
+description = "A Poetry plugin for managing monorepos, styled after Yarn workspaces."
 license = "Apache-2.0"
-authors = ["Andreas Georgiou <andreas.x.georgiou@gsk.com>"]
+authors = ["Translucence Biosystems", "Andreas Georgiou <andreas.x.georgiou@gsk.com>"]
 readme = "README.md"
-repository = "https://github.com/ag14774/poetry-monoranger-plugin"
 keywords = ["packaging", "poetry", "monorepo", "lockfile", "virtualenv"]
 classifiers = [
     "Topic :: Software Development :: Build Tools",
@@ -13,63 +12,20 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.11,<4.0"
 poetry = ">=1.8.0"
+mergedeep = "^1.3.4"
 
 [tool.poetry.group.dev.dependencies]
-ruff = ">=0.6.9,<0.10.0"
-mypy = {version="^1.13.0", extras=["faster-cache"]}
-pre-commit = "^4.0.0"
-pre-commit-hooks = "^5.0.0"
+ipython = "^9.7.0"
+ipdb = "^0.13.13"
+
+[tool.poetry.group.test.dependencies]
 pytest = "^8.3.3"
 pytest-mock = "^3.14.0"
-poetry-plugin-export = "^1.9.0"
-
-[tool.poetry.group.ci]
-optional = true
-
-[tool.poetry.group.ci.dependencies]
-pytest-github-actions-annotate-failures = ">=0.2,<0.4"
-
-[tool.mypy]
-disable_error_code = "import-untyped"
-check_untyped_defs = true
-
-[tool.ruff]
-line-length = 120
-target-version = "py39"
-
-[tool.ruff.lint]
-extend-select = [
-    "B",   # flake8-bugbear
-    "C4",  # fkale8-comprehensions
-    "D",   # pydocstyle
-    "I",   # isort
-    "N",   # pep8-naming
-    "PIE", # fkale8-pie
-    "PGH", # pygrep-hooks
-    "RUF", # ruff checks
-    "SIM", # flake8-simplify
-    "TCH", # flake8-type-checking
-    "UP",  # pyupgrade
-]
-# Disabled rules:
-# `D104`: requires documentation in __init__.py of public packages
-# `D105`: requires documentation for magic methods
-# `D107`: requires documentation for __init__ of a class.
-# `D205`: requires that there is a line between summary line and the rest. This forces the summary line to be 1 line
-# `D417`: requires documentation for every function parameter.
-# `D415`: requires that the first line should end in a question mark or exclamation point
-ignore = ["D104", "D105", "D107", "D205", "D417", "D415"]
-
-[tool.ruff.lint.extend-per-file-ignores]
-"tests/*" = ["D100", "D103"] # Disable requirement for docstrings in unit tests
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
 
 [tool.poetry.plugins."poetry.application.plugin"]
-monoranger = "poetry_monoranger_plugin.plugin:Monoranger"
+workspaces = "poetry_workspaces_plugin.plugin:WorkspacesPlugin"
 
 [build-system]
 requires = ["poetry-core"]

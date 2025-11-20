@@ -1,0 +1,48 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug add",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "add",
+        "-G",
+        "test",
+        "pytest"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspace add",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-0",
+        "--",
+        "add",
+        "-G",
+        "test",
+        "pytest"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspaces list",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspaces",
+        "list"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    }
+  ]
+}
