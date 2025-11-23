@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from typing import cast
 
 from poetry.console.commands.command import Command
 
@@ -9,8 +8,8 @@ from poetry_workspaces_plugin.context import Context
 class BaseCommand(Command):
     name: str  # type: ignore[reportIncompatibleVariableOverride]
 
-    def __init__(self, context: Context | None) -> None:
-        self.context = cast(Context, context)
+    def __init__(self, context: Context) -> None:
+        self.context = context
 
         super().__init__()
 
@@ -18,7 +17,7 @@ class BaseCommand(Command):
     def _handle(self) -> int: ...
 
     def handle(self):
-        if not self.context:
+        if not self.context.root_path.name == 'pyproject.toml':
             self.line_error(
                 'Could not find a pyproject.toml file with plugin configuration in '
                 'current directory or its parents.',

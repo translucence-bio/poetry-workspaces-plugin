@@ -18,19 +18,13 @@ from poetry.poetry import Poetry
 from poetry.toml import TOMLFile
 from tomlkit import TOMLDocument
 
-from poetry_workspaces_plugin.utils import (
-    dedupe,
-    get_default_poetry,
-    get_plugin_section,
-    update_from_diff,
-    get_workspaces_paths,
-)
+from poetry_workspaces_plugin.utils import dedupe, update_from_diff
 
 
-def merge_data(base_path: Path, workspaces_paths: list[Path]) -> dict[str, Any]:
+def merge_data(base: Path | dict[str, Any], *workspaces_paths: Path) -> dict[str, Any]:
     from mergedeep import Strategy, merge
 
-    merged_data = TOMLFile(base_path).read().value
+    merged_data = TOMLFile(base).read().value if isinstance(base, Path) else base
     workspaces_data = [TOMLFile(wp).read().value for wp in workspaces_paths]
 
     for workspace_data in workspaces_data:
@@ -41,82 +35,89 @@ def merge_data(base_path: Path, workspaces_paths: list[Path]) -> dict[str, Any]:
     return merged_data
 
 
-class PyProjectTOMLWorkspaces(PyProjectTOML):
+class TOMLFileMerged(TOMLFile):
 
-    def __init__(self, path: Path, workspaces_paths: list[Path]) -> None:
+    def __init__(self, path: Path, write_path: Path, workspaces_paths: list[Path]):
         super().__init__(path)
 
+        self._last_read = None
+        self._write_path = write_path
+        self._workspaces_paths = workspaces_paths
+
+    def set_workspace_write(self, path: Path | None):
+        self._workspace_write = path
+
+    def read(self) -> TOMLDocument:
+        data = merge_data(self._write_path, self._path, *self._workspaces_paths)
+        # data = merge_data(self._write_path, *self._workspaces_paths)
+
+        content = TOMLDocument()
+        content.update(data)
+
+        self._last_read = deepcopy(content)
+
+        return content
+
+    def write(self, data: TOMLDocument) -> None:
+        if self._last_read:
+            # Use the diff of the merged pyproject.toml to update the write target
+            target = TOMLFile(self._write_path).read().value
+
+            update_from_diff(self._last_read.value, data.value, target)
+
+            data.clear()
+            data.update(target)
+
+        _path = self._path
+        self._path = self._write_path
+
+        super().write(data)
+
+        self._path = _path
+
+
+class PyProjectMerged(PyProjectTOML):
+
+    def __init__(self, path: Path, root_path: Path, workspaces_paths: list[Path]):
+        super().__init__(path)
+
+        self._root_path = root_path
         self._workspaces_paths = workspaces_paths
 
     @property
     def data(self) -> dict[str, Any]:
         if self._data is None:
-            self._data = merge_data(self.path, self._workspaces_paths)
+            self._data = merge_data(self.path, self._root_path, *self._workspaces_paths)
 
         return super().data
 
-    @property
-    def poetry_config(self) -> dict[str, Any]:
-        try:
-            return super().poetry_config
-        except Exception:
-            return {}
 
-
-class TOMLFileWorkspaces(TOMLFile):
-
+class LockerMerged(Locker):
     def __init__(
         self,
-        path: Path,
+        lock: Path,
+        pyproject_data: dict[str, Any],
+        write_path: Path,
         workspaces_paths: list[Path],
-        write_workspace_path: Path | None = None,
-    ):
-        super().__init__(path)
+    ) -> None:
+        super().__init__(lock, pyproject_data)
 
-        self._last_read = None
-        self._write_path = write_workspace_path
+        self._write_path = write_path
         self._workspaces_paths = workspaces_paths
 
-    def set_write_path(self, target: Path):
-        self._write_path = target
+    def set_pyproject_data(self, pyproject_data: dict[str, Any]) -> None:
+        # This method is only called in the add/remove commands, and we intercept for scenarios
+        # where the same dependency is listed in more than one workspace. If it is, then don't
+        # want to modify the lockfile.
+        non_target_paths = [wp for wp in self._workspaces_paths if wp != self._write_path]
 
-    def read(self) -> TOMLDocument:
-        if self._write_path is None:
-            self._write_path = self._path
+        data = merge_data(pyproject_data, *non_target_paths)
 
-        merged_data = merge_data(self._write_path, self._workspaces_paths)
-
-        merged = TOMLDocument()
-        merged.update(merged_data)
-
-        self._last_read = deepcopy(merged)
-
-        return merged
-
-    def write(self, data: TOMLDocument) -> None:
-        _path = None
-
-        if self._write_path:
-            if self._last_read:
-                # Use the diff of the merged pyproject.toml to update the write target
-                target = TOMLFile(self._write_path).read().value
-
-                update_from_diff(self._last_read.value, data.value, target)
-
-                data.clear()
-                data.update(target)
-
-            # Override the write path so that we write to the target workspace pyproject.toml
-            _path = self._path
-            self._path = self._write_path
-
-        super().write(data)
-
-        if _path:
-            self._path = _path
+        return super().set_pyproject_data(data)
 
 
 class PoetryWorkspaces(Poetry):
+
     def __init__(
         self,
         file: Path,
@@ -125,56 +126,95 @@ class PoetryWorkspaces(Poetry):
         locker: Locker,
         config: Config,
         workspaces_paths: list[Path],
+        toml_file: TOMLFileMerged,
         disable_cache: bool = False,
     ) -> None:
         super().__init__(file, local_config, package, locker, config, disable_cache)
 
-        self.pyproject._toml_file = TOMLFileWorkspaces(file, workspaces_paths)
+        self._toml_file = toml_file
         self.workspaces_paths = workspaces_paths
 
     @property
-    def file(self) -> TOMLFileWorkspaces:
-        return cast(TOMLFileWorkspaces, super().file)
+    def file(self) -> TOMLFileMerged:
+        return self._toml_file
 
 
-def create_poetry_workspaces(pyproject_path: Path, with_groups: bool = True):
+def create_poetry_workspaces(
+    root_path: Path,
+    target_path: Path,
+    workspaces_paths: list[Path],
+):
     """Modified version of Factory().create_poetry()"""
-    io = NullIO()
+    # venv location = poetry.file.path.parent
+    # add/remove = poetry.file.read and poetry.file.write
+    # poetry.lock = poetry.locker.lock
+
+    with_groups = True
     disable_cache = False
+    io = NullIO()
 
-    workspaces_paths = get_workspaces_paths(pyproject_path)
+    pyproject_root = PyProjectTOML(root_path)
+    # pyproject_target = PyProjectTOML(target_path)
+    pyproject_merged = PyProjectMerged(target_path, root_path, workspaces_paths)
 
-    pyproject = PyProjectTOMLWorkspaces(pyproject_path, workspaces_paths)
+    # Workspaces project is never in package mode
+    if target_path == root_path:
+        pyproject_merged.data.setdefault('tool', {}).setdefault('poetry', {})['package-mode'] = False
 
-    project = pyproject.data.get('project', {})
-    name = project.get('name') or pyproject.poetry_config.get('name', 'non-package-mode')
-    version = project.get('version') or pyproject.poetry_config.get('version', '0')
+    def validate(pyproject):
+        check_result = BaseFactory.validate(pyproject.data)
+
+        if check_result["errors"]:
+            message = ""
+            for error in check_result["errors"]:
+                message += f"  - {error}\n"
+
+            raise RuntimeError("The Poetry configuration is invalid:\n" + message)
+
+    validate(pyproject_root)
+    validate(pyproject_merged)
+
+    project = pyproject_merged.data.get('project', {})
+    name = project.get('name') or pyproject_merged.poetry_config.get('name', 'non-package-mode')
+    version = project.get('version') or pyproject_merged.poetry_config.get('version', '0')
 
     package = ProjectPackage(name, version)
 
-    BaseFactory.configure_package(package, pyproject, pyproject_path, with_groups=with_groups)
+    BaseFactory.configure_package(
+        package,
+        pyproject_merged,
+        target_path.parent,
+        with_groups=with_groups,
+    )
 
-    if version_str := pyproject.poetry_config.get('requires-poetry'):
+    if version_str := pyproject_root.poetry_config.get('requires-poetry'):
         version_constraint = parse_constraint(version_str)
         version = Version.parse(poetry_version)
+
         if not version_constraint.allows(version):
             raise PoetryError(
                 f'This project requires Poetry {version_constraint},'
                 f' but you are using Poetry {version}'
             )
 
-    locker = Locker(pyproject_path.parent / 'poetry.lock', pyproject.data)
+    locker = LockerMerged(
+        root_path.parent / 'poetry.lock',
+        pyproject_merged.data,
+        target_path,
+        workspaces_paths,
+    )
 
     # Loading global configuration
     config = Config.create()
 
     # Loading local configuration
-    config.merge(pyproject.data)
+    config.merge(pyproject_root.data)
 
     # Load local sources
     repositories = {}
     existing_repositories = config.get('repositories', {})
-    for source in pyproject.poetry_config.get('source', []):
+
+    for source in pyproject_root.poetry_config.get('source', []):
         name = source.get('name')
         url = source.get('url')
         if name and url and name not in existing_repositories:
@@ -182,13 +222,17 @@ def create_poetry_workspaces(pyproject_path: Path, with_groups: bool = True):
 
     config.merge({'repositories': repositories})
 
+    # toml_file = TOMLFileMerged(root_path, target_path, workspaces_paths)
+    toml_file = TOMLFileMerged(root_path, target_path, [])
+
     poetry = PoetryWorkspaces(
-        pyproject_path,
-        pyproject.poetry_config,
+        target_path,
+        pyproject_merged.poetry_config,
         package,
         locker,
         config,
         workspaces_paths,
+        toml_file,
         disable_cache=disable_cache,
     )
 
@@ -202,19 +246,3 @@ def create_poetry_workspaces(pyproject_path: Path, with_groups: bool = True):
     )
 
     return poetry
-
-
-def get_workspaces_poetry(cwd: str | Path | None = None):
-    """Get the nearest ancestor poetry instance that has managed workspaces."""
-    cwd = Path(cwd or Path.cwd()).resolve()
-
-    candidates = [cwd, *cwd.parents]
-
-    for path in candidates:
-        poetry = get_default_poetry(path)
-
-        if poetry and poetry.pyproject.is_poetry_project():
-            if get_plugin_section(poetry.pyproject) is not None:
-                workspaces_poetry = create_poetry_workspaces(poetry.pyproject_path)
-
-                return workspaces_poetry

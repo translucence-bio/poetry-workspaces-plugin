@@ -6,7 +6,7 @@ class WorkspacesListCommand(BaseCommand):
     description = 'List all available workspaces.'
 
     def _handle(self):
-        for path in self.context.root_poetry.workspaces_paths:
+        for path in self.context.workspaces_paths:
             project_root = path.parent
 
             self.line(f' <question>{project_root.name}</question> {project_root.as_posix()}')

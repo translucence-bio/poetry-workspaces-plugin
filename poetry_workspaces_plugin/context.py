@@ -1,23 +1,21 @@
-from dataclasses import dataclass
-
-from poetry.poetry import Poetry
-
-from poetry_workspaces_plugin.poetry import PoetryWorkspaces
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
 class Context:
-    root_poetry: PoetryWorkspaces
-    target_poetry: Poetry
+    root_path: Path = Path()
+    target_path: Path = Path()
+    workspaces_paths: list[Path] = field(default_factory=list)
 
     @property
     def target_is_root(self):
-        is_root = self.target_poetry.pyproject_path == self.root_poetry.pyproject_path
-
-        return is_root
+        return self.root_path == self.target_path
 
     @property
     def target_is_managed(self):
-        is_managed = self.target_poetry.pyproject_path in self.root_poetry.workspaces_paths
+        return self.target_path in self.workspaces_paths
 
-        return is_managed
+    @property
+    def should_manage(self):
+        return bool(self.target_is_root or self.target_is_managed)

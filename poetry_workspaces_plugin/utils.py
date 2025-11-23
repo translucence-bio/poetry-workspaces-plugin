@@ -1,10 +1,19 @@
-import contextlib
+import json
+from dataclasses import dataclass
+from packaging.utils import canonicalize_name
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
+from poetry.core.packages.dependency import Dependency
+from poetry.core.packages.dependency_group import MAIN_GROUP
+from poetry.core.packages.utils.utils import convert_markers
+from poetry.core.pyproject.exceptions import PyProjectError
+from poetry.core.pyproject.toml import PyProjectTOML
 from poetry.factory import Factory
 from poetry.pyproject.toml import PyProjectTOML
-from poetry.core.pyproject.toml import PyProjectTOML
+from poetry.core.packages.dependency import Dependency
+from poetry.toml import TOMLFile
+from tomlkit import TOMLDocument, inline_table
 from tomlkit.api import array
 from tomlkit.items import Table
 
@@ -14,12 +23,39 @@ from poetry_workspaces_plugin.constants import SECTION_KEY
 T = TypeVar('T')
 
 
+@dataclass
+class ResolvedDependency:
+    dependency: Dependency
+    location: str
+    source_location: str | None = None
+
+    def __hash__(self) -> int:
+        return hash(self.dependency.name)
+
+
+def seq_to_cmdline(args):
+    "Convert a sequence of arguments to a command line string with proper quoting."""
+    parsed_args = []
+
+    for arg in args:
+        if ' ' in arg:
+            arg = f'"{arg}"'
+
+        parsed_args.append(arg)
+
+    cmd = ' '.join(parsed_args)
+
+    return cmd
+
+
 def dedupe(o: Any):
     """Recursively de-duplicate all lists in a dictionary."""
     if isinstance(o, dict):
         return {k: dedupe(v) for k, v in o.items()}
     elif isinstance(o, list):
-        return list(set(dedupe(item) for item in o))
+        return sorted(
+            [json.loads(i) for i in set(json.dumps(dedupe(item), sort_keys=True) for item in o)]
+        )
     else:
         return o
 
@@ -65,6 +101,43 @@ def update_from_diff(old_dict, new_dict, target_dict):
             target_dict.pop(key, None)
 
 
+def get_path(o: dict[str, Any], path: str):
+    keys = path.split('.')
+
+    for key in keys[:-1]:
+        o = o.get(key, {})
+
+    res = o.get(keys[-1])
+
+    return res
+
+
+def set_path(o: dict[str, Any], path: str, default: Any):
+    keys = path.split('.')
+
+    for key in keys[:-1]:
+        o = o.setdefault(key, {})
+
+    o = o.setdefault(keys[-1], default)
+
+    return o
+
+
+def delete_path(o: dict[str, Any], path: str):
+    if '.' in path:
+        path, key = path.rsplit('.', 1)
+        keys = path.split('.')
+    else:
+        key = path
+        keys = []
+
+    for key in keys:
+        o = o.get(key, dict)
+
+    if key in o:
+        del o[key]
+
+
 def get_plugin_section(pyproject: PyProjectTOML) -> Table | None:
     """Get the plugin configuration section from if it exists."""
     plugin_section = pyproject.data.get('tool', {}).get(SECTION_KEY)
@@ -72,9 +145,9 @@ def get_plugin_section(pyproject: PyProjectTOML) -> Table | None:
     return plugin_section
 
 
-def get_default_poetry(dir: Path):
-    """Get the poetry instance for directory if it exists."""
-    with contextlib.suppress(Exception):
+def create_default_poetry(dir: Path):
+    """Attempt to create a poetry instance for directory."""
+    if (dir / 'pyproject.toml').exists():
         return Factory().create_poetry(dir)
 
 
@@ -93,9 +166,258 @@ def get_workspaces_paths(pyproject_path: Path) -> list[Path]:
 
     for workspace_glob in workspaces_globs:
         for dir in pyproject_path.parent.glob(workspace_glob):
-            workspace_poetry = get_default_poetry(dir)
+            try:
+                workspace_poetry = create_default_poetry(dir)
+            except Exception as e:
+                raise PyProjectError(
+                    f'Workspace "{dir.name}" pyproject.toml is invalid.\n\n{e}'
+                )
 
             if workspace_poetry and workspace_poetry.pyproject.is_poetry_project():
                 workspace_paths.append(workspace_poetry.pyproject_path)
 
     return workspace_paths
+
+
+def get_workspaces_root_path(cwd: str | Path | None = None):
+    """Get the path of the nearest ancestor pyproject.toml that has managed workspaces."""
+    cwd = Path(cwd or Path.cwd()).resolve()
+
+    candidates = [cwd, *cwd.parents]
+
+    for path in candidates:
+        poetry = create_default_poetry(path)
+
+        if poetry and poetry.pyproject.is_poetry_project():
+            if get_plugin_section(poetry.pyproject) is not None:
+                return poetry.pyproject_path
+
+
+def get_dependency(
+    package: str,
+    content: dict[str, Any],
+    location: str,
+) -> ResolvedDependency | None:
+    """Get dependency spec if it exists in a set of dependencies."""
+    dependencies = cast(list[str] | dict[str, str | dict] | None, get_path(content, location))
+
+    if dependencies is None:
+        return
+
+    if not isinstance(dependencies, (list, dict)):
+        return
+
+    normalized_package = canonicalize_name(package)
+
+    res = None
+
+    if isinstance(dependencies, list):
+        for req in dependencies:
+            dep = Dependency.create_from_pep_508(req)
+
+            if dep.name == normalized_package:
+                if location.startswith('dependency-groups'):
+                    group_name = location.replace('dependency-groups.', '')
+
+                    src_location = f'tool.poetry.group.{group_name}.dependencies.{package}'
+                else:
+                    src_location = f'tool.poetry.dependencies.{package}'
+
+                dep.source_name = cast(str | None, get_path(content, f'{src_location}.source'))
+
+                res = ResolvedDependency(dep, location, src_location)
+    else:
+        for name, value in dependencies.items():
+            if canonicalize_name(name) == normalized_package:
+                dep = Factory().create_dependency(name, value)
+                res = ResolvedDependency(dep, location)
+
+    return res
+
+
+def get_dependency_from_pyproject(
+    pyproject_path: Path,
+    package: str,
+    group_name: str | None = None,
+) -> ResolvedDependency | None:
+    """Get the spec and dot notation path of a package (if it exists) in a pyproject file."""
+    group_name = group_name if group_name != MAIN_GROUP else None
+
+    content = TOMLFile(pyproject_path).read()
+
+    groups_content = content.get('dependency-groups', {})
+    poetry_content = content.get('tool', {}).get('poetry', {})
+    poetry_groups_content = poetry_content.get('group', {})
+
+    if group_name:
+        if group_name == 'dev' and 'dev-dependencies' in content:
+            location = 'dev-dependencies'
+
+            return get_dependency(package, content, location)
+        else:
+            location = f'dependency-groups.{group_name}'
+
+            if res := get_dependency(package, content, location):
+                return res
+
+            location = f'tool.poetry.group.{group_name}.dependencies'
+
+            return get_dependency(package, content, location)
+    else:
+        location = 'project.dependencies'
+
+        if res := get_dependency(package, content, location):
+            return res
+
+        for group_name in groups_content:
+            location = f'dependency-groups.{group_name}'
+
+            if res := get_dependency(package, content, location):
+               return res
+
+        location = 'tool.poetry.dependencies'
+
+        if res := get_dependency(package, content, location):
+            return res
+
+        for group_name in poetry_groups_content:
+            location = f'tool.poetry.group.{group_name}.dependencies'
+
+            if res := get_dependency(package, content, location):
+                return res
+
+
+def determine_location(content: dict[str, Any], group: str | None = None, is_source=False):
+    project_dependencies = content.get('project', {}).get('dependencies', None)
+    project_group_deps = content.get('dependency-groups', None)
+
+    if group:
+        if group == 'dev' and 'dev-dependencies' in content:
+            location = 'dev-dependencies'
+        else:
+            if project_dependencies is None or is_source:
+                location = f'tool.poetry.group.{group}.dependencies'
+            else:
+                location = f'dependency-groups.{group}'
+    else:
+        if project_group_deps is None or is_source:
+            location = 'tool.poetry.dependencies'
+        else:
+            location = 'project.dependencies'
+
+    return location
+
+
+def dependency_to_constraint(dependency: Dependency):
+    constraint = inline_table()
+
+    constraint['version'] = str(dependency.constraint)
+
+    if dependency.is_optional():
+        constraint['optional'] = True
+
+    if dependency.allows_prereleases():
+        constraint['allow-prereleases'] = True
+
+    if dependency.extras:
+        constraint['extras'] = list(dependency.extras)
+
+    if dependency._develop:
+        constraint['develop'] = True
+
+    if not dependency.python_constraint.is_any():
+        constraint['python'] = str(dependency.python_constraint)
+
+    if str(dependency.marker):
+        markers = convert_markers(dependency.marker)
+
+        if 'python_version' in markers:
+            constraint['python'] = ','.join([''.join(m) for m in markers['python_version'][0]])
+
+        if 'sys_platform' in markers:
+            constraint['platform'] = ','.join([''.join(m) for m in markers['sys_platform'][0]])
+
+        remaining = dependency.marker.exclude('sys_platform').exclude('python_version')
+
+        if str(remaining):
+            constraint['markers'] = str(remaining)
+
+    if dependency.source_name:
+        constraint['source'] = dependency.source_name
+
+    if len(constraint) == 1 and 'version' in constraint:
+        constraint = constraint['version']
+
+    return constraint
+
+
+def add_package(
+    content: TOMLDocument,
+    res: ResolvedDependency,
+    group: str | None = None,
+):
+    """Add a package entry to a pyproject dict."""
+    group = group if group != MAIN_GROUP else None
+
+    location = determine_location(content, group)
+
+    if location.startswith('project') or location.startswith('dependency-groups'):
+        default = array().multiline(True)
+    else:
+        default = inline_table()
+
+    container = set_path(content, location, default)
+
+    name = res.dependency.name
+
+    # If list, use pep_508 format. Otherwise, use dict
+    if isinstance(container, list):
+        container.append(res.dependency.to_pep_508())
+
+        if res.dependency.source_name:
+            location = determine_location(content, group, True)
+
+            set_path(content, f'{location}.{name}.source', res.dependency.source_name)
+
+    elif isinstance(container, dict):
+        container[name] = dependency_to_constraint(res.dependency)
+
+
+def remove_package(content: dict[str, Any], res: ResolvedDependency):
+    """Remove a package entry from a pyproject dict."""
+    container = get_path(content, res.location)
+
+    if not isinstance(container, (list, dict)):
+        return
+
+    if isinstance(container, list):
+        for req in container:
+            if Dependency.create_from_pep_508(req).name == res.dependency.name:
+                container.remove(req)
+
+                if res.source_location:
+                    location, key = res.source_location.rsplit('.', 1)
+
+                    src_container = get_path(content, location)
+
+                    if src_container and key in src_container:
+                        del src_container[key]
+
+                break
+
+    elif isinstance(container, dict):
+        for name in container:
+            if canonicalize_name(name) == res.dependency.name:
+                del content[name]
+
+                break
+
+    # Delete any empty containers
+    if not container:
+        location = res.location
+
+        while not container:
+            location = location.rsplit('.', 1)[0]
+            container = get_path(content, location)
+
+        delete_path(content, location)

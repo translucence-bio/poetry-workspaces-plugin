@@ -4,7 +4,8 @@ from typing import cast
 from cleo.helpers import argument
 
 from poetry_workspaces_plugin.commands.base import BaseCommand
-from poetry_workspaces_plugin.utils import get_default_poetry
+from poetry_workspaces_plugin.constants import LOG_PREFIX
+from poetry_workspaces_plugin.utils import seq_to_cmdline
 
 
 class WorkspaceCommand(BaseCommand):
@@ -28,7 +29,7 @@ class WorkspaceCommand(BaseCommand):
         workspace_name = self.argument('workspace_name')
         command_name = self.argument('command_name')
 
-        workspaces_paths = self.context.root_poetry.workspaces_paths
+        workspaces_paths = self.context.workspaces_paths
 
         workspace_path = next(
             filter(lambda wp: wp.parent.name == workspace_name, workspaces_paths),
@@ -39,24 +40,15 @@ class WorkspaceCommand(BaseCommand):
         if not workspace_path:
             raise ValueError(f'Could not find a project with the name: {workspace_name}')
 
+        self.context.target_path = workspace_path
+
         name = command_name[0]
-        args = ' '.join(command_name)
+        args = seq_to_cmdline(command_name)
 
         self.line(
-            f'Running <info>{name}</info> in workspace <question>{workspace_name}</question>\n'
+            f'{LOG_PREFIX} Running <info>{name}</info> in workspace <c1>{workspace_name}</c1>'
         )
-
-        target_poetry = get_default_poetry(workspace_path.parent)
-
-        if not target_poetry:
-            self.line_error(
-                f'Pyproject file for workspace "{workspace_name}" is invalid or does not exist.',
-                'error',
-            )
-
-            return 1
-
-        self.context.target_poetry = target_poetry
+        self.line('')
 
         self.call(name, args)
 
