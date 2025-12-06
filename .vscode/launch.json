@@ -1,0 +1,153 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug lock",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "lock"
+      ],
+      "justMyCode": false,
+      "cwd": "/Users/blakjak/projects/runner-dev/runner/packages/runner-server"
+    },
+    {
+      "name": "Debug workspace build",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "runner-server",
+        "--",
+        "build",
+        "-f",
+        "wheel"
+      ],
+      "justMyCode": false,
+      "cwd": "/Users/blakjak/projects/runner-dev/runner"
+    },
+    {
+      "name": "Debug add",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "add",
+        "-G",
+        "test",
+        "pytest"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspace add package-0 extras",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-1",
+        "add",
+        "napari[pyqt6, optional]",
+        "-v"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspace add package-0",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-0",
+        "add",
+        "fastapi"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspace add package-1",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-1",
+        "add",
+        "napari",
+        "sqlalchemy"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspace remove package-0",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-0",
+        "remove",
+        "fastapi"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspace remove package-1",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspace",
+        "package-1",
+        "remove",
+        "napari",
+        "sqlalchemy"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug workspaces list",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "workspaces",
+        "list"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug install",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "install"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev"
+    },
+    {
+      "name": "Debug install workspace",
+      "type": "python",
+      "request": "launch",
+      "module": "poetry",
+      "args": [
+        "install"
+      ],
+      "justMyCode": false,
+      "cwd": "${workspaceFolder}/dev/packages/package-0"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "poetry-workspaces-plugin"
+version = "0.1.0"
+description = "A Poetry plugin for managing monorepos, styled after Yarn workspaces."
+license = "MIT"
+authors = ["Translucence Biosystems"]
+readme = "README.md"
+keywords = ["packaging", "dependency", "poetry", "monorepo", "workspaces"]
+classifiers = [
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+poetry = ">=1.8.0"
+mergedeep = "^1.3.4"
+
+[tool.poetry.group.dev.dependencies]
+ipython = "^9.7.0"
+ipdb = "^0.13.13"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.3"
+pytest-mock = "^3.14.0"
+
+[tool.poetry.plugins."poetry.application.plugin"]
+workspaces = "poetry_workspaces_plugin.plugin:WorkspacesPlugin"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

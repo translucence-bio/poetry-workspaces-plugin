@@ -1,0 +1,2 @@
+- Ensure sources in subprojects don't conflict with root project sources.
+- Ensure poetry remove does not remove packages when package exists in multiple workspaces.
